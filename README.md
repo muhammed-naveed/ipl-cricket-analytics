@@ -24,3 +24,4 @@ ipl-cricket-analytics/
 ├── .gitignore
 ├── README.md
 └── requirements.txt
+# ipl-cricket-analytics
