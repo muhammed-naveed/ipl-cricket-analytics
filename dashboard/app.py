@@ -38,7 +38,10 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-DB_PATH = Path(r"C:\Users\navee\ipl-cricket-analytics\data\raw\ipl.db")
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DB_PATH = PROJECT_ROOT / "data" / "raw" / "ipl.db"
 
 PHASES = ["Powerplay", "Middle", "Death"]
 HANDS = ["Left hand Bat", "Right hand Bat"]
