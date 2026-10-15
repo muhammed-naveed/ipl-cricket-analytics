@@ -410,7 +410,6 @@ def background_url():
 
 st.markdown(CSS.replace("__BG_URL__", background_url()), unsafe_allow_html=True)
 
-
 CURSOR_JS = """
 <script>
 (function () {
@@ -627,7 +626,8 @@ def filter_season(df, season):
 def style_fig(fig, height=360, legend=True):
     fig.update_layout(
         height=height,
-        margin=dict(l=8, r=8, t=14, b=8),
+        # Extra space keeps Plotly axis titles and tick labels visible on every chart.
+        margin=dict(l=58, r=22, t=42, b=58),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(family="Inter, sans-serif", color="#BFD0E3", size=12),
@@ -636,8 +636,20 @@ def style_fig(fig, height=360, legend=True):
                     yanchor="bottom", y=1.02, xanchor="right", x=1),
         hoverlabel=dict(bgcolor="#0B1B31", bordercolor=CYAN, font=dict(color="#F8FAFC", family="Inter, sans-serif")),
     )
-    fig.update_xaxes(gridcolor=GRID, zeroline=False, linecolor=GRID, tickfont=dict(color=MUTED))
-    fig.update_yaxes(gridcolor=GRID, zeroline=False, linecolor=GRID, tickfont=dict(color=MUTED))
+    fig.update_xaxes(
+        gridcolor=GRID, zeroline=False, linecolor=GRID,
+        tickfont=dict(color=MUTED, size=11),
+        title_font=dict(color="#DCE8F5", size=12),
+        title_standoff=12,
+        automargin=True,
+    )
+    fig.update_yaxes(
+        gridcolor=GRID, zeroline=False, linecolor=GRID,
+        tickfont=dict(color=MUTED, size=11),
+        title_font=dict(color="#DCE8F5", size=12),
+        title_standoff=12,
+        automargin=True,
+    )
     return fig
 
 
@@ -706,6 +718,20 @@ def chart_hands(key, global_hand):
     if global_hand != "All":
         sel = [h for h in sel if h == global_hand]
     return sel
+
+
+def readable_axis_label(metric):
+    """Turn technical metric names into reader-friendly chart axis labels."""
+    return {
+        "Strike rate": "Strike rate (runs per 100 balls)",
+        "Batting average": "Batting average (runs per dismissal)",
+        "Run share": "Run share (%)",
+        "Dot-ball %": "Dot balls (%)",
+        "Runs": "Total runs",
+        "Balls faced": "Legal balls faced",
+        "Sixes": "Sixes",
+        "Average": "Batting average (runs per dismissal)",
+    }.get(metric, str(metric))
 
 
 def pad_range(vals, pad=0.12):
@@ -1010,6 +1036,7 @@ def effect_label(d):
     return "large"
 
 
+
 # ============================================================
 # 7. GLOBAL DATA + SIDEBAR
 # ============================================================
@@ -1072,160 +1099,60 @@ def render_universe_header():
 
 
 HERO_METRICS = {"Strike rate": "sr", "Batting average": "avg", "Runs": "runs"}
-HERO_CHARTS = ["Dumbbell", "Bar Chart", "Race Bars", "Line Chart", "Area Chart", "Radar Chart",
-               "Polar Bars", "Slope Chart", "Bubble Matrix"]
+HERO_CHARTS = ["Comparison Bars", "Trend Line", "Dot Plot", "Slope Chart"]
 HAND_FILLS = {"Left hand Bat": "rgba(167,139,250,.22)", "Right hand Bat": "rgba(34,211,238,.20)"}
 DONUT_SHADES = {"Left hand Bat": ["#C4B5FD", "#8B5CF6", "#6D28D9"], "Right hand Bat": ["#67E8F9", "#22D3EE", "#0E7490"]}
 
 
 def hero_alt_figure(chart, metric, look):
-    """Alternative hero views built from the SAME `look` table as the dumbbell (same SQL / data)."""
+    """Simple presentation charts for the batting-hand comparison."""
     key = HERO_METRICS[metric]
     dec = 0 if key == "runs" else 1
-    cats = ["Overall"] + PHASES
-
-    def val(c, h):
-        return look.get((c, h), {}).get(key, np.nan)
-
-    def extra(c, h):
-        d = look.get((c, h), {})
-        return [d.get("batters", np.nan), d.get("balls", np.nan)]
-
-    def lab(v):
+    phases = PHASES
+    def val(phase, hand):
+        return look.get((phase, hand), {}).get(key, np.nan)
+    def label(v):
         return f"{v:,.{dec}f}" if np.isfinite(v) else ""
 
     fig = go.Figure()
-    if chart == "Bar Chart":
+    if chart == "Comparison Bars":
         for hand in HANDS:
-            ys = [val(c, hand) for c in cats]
-            fig.add_trace(go.Bar(
-                x=cats, y=ys, name=hand, marker=dict(color=HAND_COLORS[hand], line=dict(color="rgba(255,255,255,.18)", width=1)),
-                text=[lab(v) for v in ys], textposition="outside", textfont=dict(size=11, color="#CBD5E1"),
-                customdata=[extra(c, hand) for c in cats], cliponaxis=False,
-                hovertemplate="<b>" + hand + "</b><br>%{x}: %{y:,.1f}<br>%{customdata[0]:,.0f} batters · "
-                              "%{customdata[1]:,.0f} legal balls<extra></extra>",
-            ))
-        style_fig(fig, 430)
-        fig.update_layout(barmode="group", bargap=0.28)
-        fig.update_yaxes(title=metric, rangemode="tozero")
-        fig.update_xaxes(showgrid=False)
-    elif chart in ("Line Chart", "Area Chart"):
+            vals = [val(p, hand) for p in phases]
+            fig.add_trace(go.Bar(x=phases, y=vals, name=short_hand(hand), marker_color=HAND_COLORS[hand],
+                                 text=[label(v) for v in vals], textposition="outside", cliponaxis=False))
+        fig.update_layout(barmode="group")
+        fig.update_xaxes(title="Match phase")
+        fig.update_yaxes(title=readable_axis_label(metric), rangemode="tozero")
+    elif chart == "Trend Line":
         for hand in HANDS:
-            ys = [val(p, hand) for p in PHASES]
-            fig.add_trace(go.Scatter(
-                x=PHASES, y=ys, name=hand, mode="lines+markers+text",
-                line=dict(color=HAND_COLORS[hand], width=3, shape="spline", smoothing=0.4),
-                marker=dict(size=10, color=HAND_COLORS[hand], line=dict(color="#061225", width=2)),
-                fill="tozeroy" if chart == "Area Chart" else None, fillcolor=HAND_FILLS[hand],
-                text=[lab(v) for v in ys], textposition="top center", textfont=dict(size=11, color=HAND_COLORS[hand]),
-                customdata=[extra(p, hand) for p in PHASES],
-                hovertemplate="<b>" + hand + "</b><br>%{x}: %{y:,.1f}<br>%{customdata[0]:,.0f} batters · "
-                              "%{customdata[1]:,.0f} legal balls<extra></extra>",
-            ))
-        style_fig(fig, 430)
-        fig.update_yaxes(title=metric, rangemode="tozero")
-        fig.update_xaxes(showgrid=False, type="category")
-    elif chart == "Radar Chart":
-        allv = []
+            vals = [val(p, hand) for p in phases]
+            fig.add_trace(go.Scatter(x=phases, y=vals, mode="lines+markers+text", name=short_hand(hand),
+                                     line=dict(color=HAND_COLORS[hand], width=4),
+                                     marker=dict(size=11, color=HAND_COLORS[hand]),
+                                     text=[label(v) for v in vals], textposition="top center"))
+        fig.update_xaxes(title="Match phase")
+        fig.update_yaxes(title=readable_axis_label(metric), rangemode="tozero")
+    elif chart == "Dot Plot":
+        for hand, offset in zip(HANDS, [-0.14, 0.14]):
+            vals = [val(p, hand) for p in phases]
+            y = np.arange(len(phases)) + offset
+            fig.add_trace(go.Scatter(x=vals, y=y, mode="markers+text", name=short_hand(hand),
+                                     marker=dict(size=17, color=HAND_COLORS[hand]),
+                                     text=[label(v) for v in vals], textposition="middle right"))
+        fig.update_yaxes(tickmode="array", tickvals=np.arange(len(phases)), ticktext=phases, title="Match phase")
+        fig.update_xaxes(title=readable_axis_label(metric), rangemode="tozero")
+    else:  # Slope Chart
+        x=[0,1]
         for hand in HANDS:
-            rs = [val(p, hand) for p in PHASES]
-            rs = [r if np.isfinite(r) else 0 for r in rs]
-            allv += rs
-            fig.add_trace(go.Scatterpolar(
-                r=rs + rs[:1], theta=PHASES + PHASES[:1], name=hand, fill="toself", fillcolor=HAND_FILLS[hand],
-                mode="lines+markers+text", line=dict(color=HAND_COLORS[hand], width=3), marker=dict(size=8),
-                text=[lab(r) for r in rs] + [""], textfont=dict(size=11, color=HAND_COLORS[hand]),
-                hovertemplate="<b>" + hand + "</b> · %{theta}<br>" + metric + ": %{r:,.1f}<extra></extra>",
-            ))
-        style_fig(fig, 430)
-        fig.update_layout(polar=dict(
-            bgcolor="rgba(0,0,0,0)",
-            radialaxis=dict(range=[0, max(allv + [1]) * 1.2], gridcolor=GRID, linecolor=GRID, tickfont=dict(color=MUTED, size=10)),
-            angularaxis=dict(gridcolor=GRID, linecolor=GRID, tickfont=dict(color="#CBD5E1", size=13)),
-        ))
-    elif chart == "Race Bars":
-        for hand in HANDS:
-            xs = [val(c, hand) for c in cats][::-1]
-            fig.add_trace(go.Bar(
-                y=cats[::-1], x=xs, name=hand, orientation="h",
-                marker=dict(color=HAND_COLORS[hand], line=dict(color="rgba(255,255,255,.25)", width=1)),
-                text=[lab(v) for v in xs], textposition="outside", textfont=dict(size=11, color="#CBD5E1"), cliponaxis=False,
-                customdata=[extra(c, hand) for c in cats[::-1]],
-                hovertemplate="<b>" + hand + "</b><br>%{y}: %{x:,.1f}<br>%{customdata[0]:,.0f} batters · "
-                              "%{customdata[1]:,.0f} legal balls<extra></extra>",
-            ))
-        style_fig(fig, 430)
-        fig.update_layout(barmode="group", bargap=0.30)
-        fig.update_xaxes(title=metric, rangemode="tozero")
-        fig.update_yaxes(showgrid=False)
-    elif chart == "Polar Bars":
-        for hand in HANDS:
-            rs = [val(p, hand) for p in PHASES]
-            fig.add_trace(go.Barpolar(
-                r=[r if np.isfinite(r) else 0 for r in rs], theta=PHASES, name=hand,
-                marker=dict(color=HAND_COLORS[hand], opacity=0.78, line=dict(color="#061225", width=2)),
-                hovertemplate="<b>" + hand + "</b> · %{theta}<br>" + metric + ": %{r:,.1f}<extra></extra>",
-            ))
-        style_fig(fig, 430)
-        fig.update_layout(polar=dict(
-            bgcolor="rgba(0,0,0,0)", barmode="overlay",
-            radialaxis=dict(gridcolor=GRID, linecolor=GRID, tickfont=dict(color=MUTED, size=10)),
-            angularaxis=dict(gridcolor=GRID, linecolor=GRID, tickfont=dict(color="#CBD5E1", size=13)),
-        ))
-    elif chart == "Slope Chart":
-        for i, c in enumerate(cats):
-            lv, rv = val(c, HANDS[0]), val(c, HANDS[1])
-            if not (np.isfinite(lv) and np.isfinite(rv)):
-                continue
-            col = PALETTE[i % len(PALETTE)]
-            fig.add_trace(go.Scatter(
-                x=["Left-hand", "Right-hand"], y=[lv, rv], name=c, mode="lines+markers+text",
-                line=dict(color=col, width=4), marker=dict(size=13, color=col, line=dict(color="#061225", width=2)),
-                text=[f"{c} · {lab(lv)}", f"{lab(rv)}"], textposition=["middle left", "middle right"],
-                textfont=dict(size=11, color=col),
-                hovertemplate="<b>" + c + "</b><br>%{x}: %{y:,.1f}<extra></extra>",
-            ))
-        style_fig(fig, 430)
-        fig.update_xaxes(showgrid=False, type="category", range=[-0.6, 1.6])
-        fig.update_yaxes(title=metric)
-    elif chart == "Bubble Matrix":
-        xs, ys, sz, cl, tx = [], [], [], [], []
-        for hand in HANDS:
-            for c in cats:
-                v = val(c, hand)
-                if np.isfinite(v):
-                    xs.append(c); ys.append(short_hand(hand)); sz.append(v); cl.append(v); tx.append(lab(v))
-        mx_ = max(sz + [1])
-        fig.add_trace(go.Scatter(
-            x=xs, y=ys, mode="markers+text", text=tx, textposition="middle center",
-            textfont=dict(size=12, color="#F8FAFC"),
-            marker=dict(size=[28 + 62 * (v / mx_) for v in sz], color=cl, colorscale=NEON_SCALE, opacity=0.92,
-                        line=dict(color="rgba(255,255,255,.55)", width=1.5),
-                        colorbar=dict(thickness=10, outlinewidth=0, tickfont=dict(color=MUTED))),
-            hovertemplate="<b>%{y}</b> · %{x}<br>" + metric + ": %{text}<extra></extra>",
-        ))
-        style_fig(fig, 430, legend=False)
-        fig.update_xaxes(type="category", categoryorder="array", categoryarray=cats, showgrid=False)
-        fig.update_yaxes(showgrid=False)
-    else:  # Donut Chart — only offered for the additive metric (Runs)
-        labels, values, colors = [], [], []
-        for hand in HANDS:
-            for i, p in enumerate(PHASES):
-                v = val(p, hand)
-                if np.isfinite(v) and v > 0:
-                    labels.append(f"{short_hand(hand)} · {p}")
-                    values.append(v)
-                    colors.append(DONUT_SHADES[hand][i])
-        fig.add_trace(go.Pie(
-            labels=labels, values=values, hole=0.62, sort=False,
-            marker=dict(colors=colors, line=dict(color="#061225", width=3)),
-            textinfo="label+percent", textfont=dict(color="#F8FAFC", size=12),
-            hovertemplate="<b>%{label}</b><br>Runs: %{value:,.0f}<br>Share: %{percent}<extra></extra>",
-        ))
-        fig.add_annotation(text=f"<b>{sum(values):,.0f}</b><br><span style='font-size:11px;color:#7F97B0'>runs</span>",
-                           x=0.5, y=0.5, xref="paper", yref="paper", showarrow=False,
-                           font=dict(size=26, color="#F8FAFC"))
-        style_fig(fig, 430, legend=False)
+            overall=look.get(("Overall", hand), {}).get(key, np.nan)
+            death=look.get(("Death", hand), {}).get(key, np.nan)
+            vals=[overall, death]
+            fig.add_trace(go.Scatter(x=x, y=vals, mode="lines+markers+text", name=short_hand(hand),
+                                     line=dict(color=HAND_COLORS[hand], width=4), marker=dict(size=13, color=HAND_COLORS[hand]),
+                                     text=[label(v) for v in vals], textposition="middle right"))
+        fig.update_xaxes(tickmode="array", tickvals=[0,1], ticktext=["Overall", "Death phase"], title="Comparison")
+        fig.update_yaxes(title=readable_axis_label(metric), rangemode="tozero")
+    style_fig(fig, 390, legend=True)
     return fig
 
 
@@ -1278,441 +1205,309 @@ def render_ticker():
 def render_dumbbell(g):
     with module("hero"):
         head = st.empty()
-        c1, c2, c4 = st.columns([1, 1, 1.3])
+        c1, c2, c3 = st.columns([1, 1, 1.3])
         with c1:
             season = chart_season("hero", g["season"])
         with c2:
-            extra = st.number_input("Min legal balls", 0, 5000, 0, 25, key="hero_minballs",
-                                    help="Applied on top of the global minimum.")
-        # Metric is created first (it decides which chart types make sense) but sits in the 4th column.
-        with c4:
-            hero_metric = st.selectbox("Metric", list(HERO_METRICS.keys()), key="hero_metric",
-                                       help="The Dumbbell always shows strike rate and average together.")
-        chart_options = HERO_CHARTS + (["Donut Chart"] if hero_metric == "Runs" else [])
-        hero_chart = st.radio("Hero Visualization — pick a chart type", chart_options, horizontal=True, key="hero_chart_pick")
-        st.caption("This module always compares both hands, so the global batting-hand filter is not applied here.")
+            extra = st.number_input("Extra minimum balls", 0, 5000, 0, 25, key="hero_minballs")
+        with c3:
+            hero_metric = st.selectbox("What should we compare?", list(HERO_METRICS.keys()), key="hero_metric")
+        hero_chart = st.radio("Choose a simple visual", HERO_CHARTS, horizontal=True, key="hero_chart_pick")
+        st.caption("Question answered: do left-hand and right-hand batters score differently across the match phases?")
 
-        min_balls = max(g["min_balls"], int(extra))
-        min_runs = g["min_runs"]
+        min_balls = max(g["min_balls"], int(extra)); min_runs = g["min_runs"]
         pool = batter_pool(season, "All", min_balls, min_runs)
         pool = pool[pool["batting_hand"].isin(HANDS)]
         if pool.empty or pool["batting_hand"].nunique() < 2:
-            render_head(head, "bolt", "Hero insight · batting hand", "Not enough batters of both hands to compare")
-            empty_state()
-            return
-
-        overall = pool.groupby("batting_hand").agg(
-            runs=("runs", "sum"), balls=("balls", "sum"), outs=("outs", "sum"), batters=("batter", "nunique")
-        )
+            render_head(head, "bolt", "1 · Which batting hand scores better?", "Not enough batters on both sides to compare")
+            empty_state(); return
+        overall = pool.groupby("batting_hand").agg(runs=("runs","sum"), balls=("balls","sum"), outs=("outs","sum"), batters=("batter","nunique"))
         ptbl = hand_phase_table(season, "All", min_balls, min_runs)
         ptbl = ptbl[ptbl["batting_hand"].isin(HANDS) & ptbl["phase"].isin(PHASES)]
-
-        look = {}
+        look={}
         for hand in HANDS:
             if hand in overall.index:
-                o = overall.loc[hand]
-                look[("Overall", hand)] = dict(runs=o["runs"], balls=o["balls"], outs=o["outs"], batters=o["batters"])
-        for _, r in ptbl.iterrows():
-            look[(r["phase"], r["batting_hand"])] = dict(runs=r["runs"], balls=r["balls"], outs=r["outs"], batters=r["batters"])
-        for v in look.values():
-            v["sr"] = sdiv(v["runs"] * 100, v["balls"])
-            v["avg"] = sdiv(v["runs"], v["outs"])
-
-        base = league_baseline(season)
-        render_hud(look, base)
-
-        if hero_chart != "Dumbbell":
-            test_alt = hand_test(pool)
-            alt_fig = hero_alt_figure(hero_chart, hero_metric, look)
-            ov_l = look.get(("Overall", HANDS[0]), {})
-            ov_r = look.get(("Overall", HANDS[1]), {})
-            alt_title = f"{hero_metric} compared across batting hands and match phases"
-            alt_sub = (f"{hero_chart} · {int(ov_l.get('batters', 0))} left-hand vs {int(ov_r.get('batters', 0))} right-hand batters · "
-                       f"{fnum(ov_l.get('balls'))} vs {fnum(ov_r.get('balls'))} legal balls · "
-                       f"minimum {min_balls} balls and {min_runs} runs")
-            render_head(head, "bolt", "Hero insight · batting hand", alt_title, alt_sub)
-            show_chart(alt_fig, "chart_hero_alt")
-            render_hero_insight(test_alt)
-            return
-
-        cats = ["Overall"] + PHASES
-        fig = make_subplots(rows=1, cols=2, subplot_titles=("STRIKE RATE", "BATTING AVERAGE"),
-                            horizontal_spacing=0.10, shared_yaxes=True)
-        fig.update_annotations(font=dict(color="#9FB2C8", size=11))
-
-        all_x = {"sr": [], "avg": []}
-        for col, metric, ref in ((1, "sr", base["sr"]), (2, "avg", base["avg"])):
-            for cat in cats:
-                lv = look.get((cat, HANDS[0]), {}).get(metric, np.nan)
-                rv = look.get((cat, HANDS[1]), {}).get(metric, np.nan)
-                if np.isfinite(lv) and np.isfinite(rv):
-                    fig.add_trace(go.Scatter(x=[lv, rv], y=[cat, cat], mode="lines",
-                                             line=dict(color="rgba(148,163,184,.45)", width=5),
-                                             hoverinfo="skip", showlegend=False), row=1, col=col)
-            for hand, pos in zip(HANDS, ("top center", "bottom center")):
-                xs = [look.get((c, hand), {}).get(metric, np.nan) for c in cats]
-                custom = [[look.get((c, hand), {}).get("batters", np.nan),
-                           look.get((c, hand), {}).get("balls", np.nan)] for c in cats]
-                all_x[metric] += [x for x in xs if np.isfinite(x)]
-                fig.add_trace(go.Scatter(
-                    x=xs, y=cats, mode="markers+text", name=hand, legendgroup=hand, showlegend=(col == 1),
-                    marker=dict(size=17, color=HAND_COLORS[hand], line=dict(color="#061225", width=2)),
-                    text=[f"{x:.1f}" if np.isfinite(x) else "" for x in xs], textposition=pos,
-                    textfont=dict(size=11, color=HAND_COLORS[hand]), customdata=custom,
-                    hovertemplate="<b>" + hand + "</b><br>%{y}: %{x:.1f}<br>%{customdata[0]:,.0f} batters · "
-                                  "%{customdata[1]:,.0f} legal balls<extra></extra>",
-                ), row=1, col=col)
-            if np.isfinite(ref):
-                all_x[metric].append(ref)
-                fig.add_vline(x=ref, line_dash="dot", line_color=AMBER, row=1, col=col,
-                              annotation_text=f"IPL baseline {ref:.1f}", annotation_position="bottom right",
-                              annotation_font=dict(color=AMBER, size=10))
-        style_fig(fig, 430)
-        fig.update_yaxes(categoryorder="array", categoryarray=cats[::-1])
-        for col, metric in ((1, "sr"), (2, "avg")):
-            rng = pad_range(all_x[metric], 0.18)
-            if rng:
-                fig.update_xaxes(range=rng, row=1, col=col)
-
-        test = hand_test(pool)
-        ov_l = look.get(("Overall", HANDS[0]), {})
-        ov_r = look.get(("Overall", HANDS[1]), {})
-        gap = abs(ov_l.get("sr", np.nan) - ov_r.get("sr", np.nan))
-        if test and np.isfinite(gap):
-            who = "Left-handers" if ov_l["sr"] > ov_r["sr"] else "Right-handers"
-            if test["p"] < 0.05:
-                title = f"{who} score faster by {gap:.1f} SR points — a gap unlikely to be chance alone"
-            else:
-                title = f"Batting hand shifts scoring tempo by only {gap:.1f} SR points — the gap is not statistically clear"
-        else:
-            title = "Left- and right-handers compared on tempo, average and sample size"
-        sub = (f"Which batting hand creates the stronger scoring profile? · {int(ov_l.get('batters', 0))} left-hand vs "
-               f"{int(ov_r.get('batters', 0))} right-hand batters · {fnum(ov_l.get('balls'))} vs {fnum(ov_r.get('balls'))} legal balls · "
-               f"minimum {min_balls} balls and {min_runs} runs")
-        render_head(head, "bolt", "Hero insight · batting hand", title, sub)
-        show_chart(fig, "chart_hero_dumbbell")
-        render_hero_insight(test)
+                o=overall.loc[hand]; look[("Overall",hand)] = dict(runs=o["runs"],balls=o["balls"],outs=o["outs"],batters=o["batters"])
+        for _,r in ptbl.iterrows(): look[(r["phase"],r["batting_hand"])] = dict(runs=r["runs"],balls=r["balls"],outs=r["outs"],batters=r["batters"])
+        for v in look.values(): v["sr"]=sdiv(v["runs"]*100,v["balls"]); v["avg"]=sdiv(v["runs"],v["outs"])
+        base=league_baseline(season); render_hud(look,base)
+        fig=hero_alt_figure(hero_chart,hero_metric,look)
+        ol=look.get(("Overall",HANDS[0]),{}); or_=look.get(("Overall",HANDS[1]),{})
+        lv=ol.get(HERO_METRICS[hero_metric],np.nan); rv=or_.get(HERO_METRICS[hero_metric],np.nan)
+        if np.isfinite(lv) and np.isfinite(rv):
+            winner=short_hand(HANDS[0]) if lv>rv else short_hand(HANDS[1]); gap=abs(lv-rv)
+            title=f"{winner} leads by {gap:.1f} {hero_metric.lower()} points overall" if hero_metric!="Runs" else f"{winner} scores {gap:,.0f} more runs in the sample"
+        else: title="Left-hand and right-hand batters compared across the IPL"
+        sub=f"{hero_chart} · {hero_metric} · {int(ol.get('batters',0))} left-hand vs {int(or_.get('batters',0))} right-hand batters"
+        render_head(head,"bolt","1 · Which batting hand scores better?",title,sub)
+        show_chart(fig,"chart_hero_alt")
+        render_hero_insight(hand_test(pool))
 
 
 def render_heatmap(g):
     with module("heat"):
-        head = st.empty()
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            season = chart_season("heat", g["season"])
-        with c2:
-            hands = chart_hands("heat", g["hand"])
-        with c3:
-            metric = st.selectbox("Metric", PHASE_METRICS, key="heat_metric")
-
-        tbl = hand_phase_table(season, "All", g["min_balls"], g["min_runs"])
-        if not tbl.empty:
-            tbl = tbl[tbl["batting_hand"].isin(hands) & tbl["phase"].isin(PHASES)]
-        if tbl.empty:
-            render_head(head, "grid", "Phase heatmap", "No scoring pattern to show for these filters")
-            empty_state()
-            return
-
-        vals = phase_metric_values(tbl, metric, group="batting_hand")
-        rows = [h for h in HANDS if h in set(vals["batting_hand"])]
-
-        def pv(col):
-            return vals.pivot(index="batting_hand", columns="phase", values=col).reindex(index=rows, columns=PHASES)
-
-        z = pv("value")
-        text = z.map(lambda v: fmt_metric(v, metric))
-        custom = np.dstack([pv("runs").values, pv("balls").values, pv("batters").values])
-        fig = go.Figure(go.Heatmap(
-            z=z.values, x=PHASES, y=[short_hand(r) if False else r for r in rows], text=text.values,
-            texttemplate="%{text}", textfont=dict(size=17, color="#F8FAFC"), customdata=custom,
-            colorscale=NEON_SCALE, xgap=5, ygap=5,
-            colorbar=dict(thickness=10, outlinewidth=0, tickfont=dict(color=MUTED)),
-            hovertemplate="<b>%{y}</b> · %{x}<br>" + metric + ": %{text}<br>Runs: %{customdata[0]:,.0f}<br>"
-                          "Balls: %{customdata[1]:,.0f}<br>Batters: %{customdata[2]:,.0f}<extra></extra>",
-        ))
-        style_fig(fig, 330, legend=False)
-        fig.update_xaxes(showgrid=False)
-        fig.update_yaxes(showgrid=False, autorange="reversed")
-
-        best = vals.dropna(subset=["value"])
-        if best.empty:
-            title = "Phase patterns are not available for these filters"
-        else:
-            b = best.loc[best["value"].idxmax()]
-            if metric == "Strike rate":
-                title = f"{b['phase']} overs create the strongest scoring tempo — {b['value']:.1f} SR for {b['batting_hand']}"
-            elif metric == "Run share":
-                title = f"{b['phase']} overs carry the biggest slice of runs — {b['value']:.1f}% for {b['batting_hand']}"
-            else:
-                title = f"{b['phase']} overs bring the heaviest dot-ball pressure — {b['value']:.1f}% for {b['batting_hand']}"
-        n_b = int(tbl.groupby("batting_hand")["batters"].max().sum())
-        sub = f"{metric} by batting hand and phase · {n_b} batters · {fnum(tbl['balls'].sum())} legal balls · minimum {g['min_balls']} balls"
-        render_head(head, "grid", "Phase heatmap", title, sub)
-        show_chart(fig, "chart_heatmap")
+        head=st.empty(); c1,c2,c3=st.columns(3)
+        with c1: season=chart_season("heat",g["season"])
+        with c2: hands=chart_hands("heat",g["hand"])
+        with c3: metric=st.selectbox("Measure",PHASE_METRICS,key="heat_metric")
+        tbl=hand_phase_table(season,"All",g["min_balls"],g["min_runs"])
+        if not tbl.empty: tbl=tbl[tbl["batting_hand"].isin(hands)&tbl["phase"].isin(PHASES)]
+        if tbl.empty: render_head(head,"grid","2 · When do batters score best?","No phase data for these filters"); empty_state(); return
+        vals=phase_metric_values(tbl,metric,group="batting_hand").dropna(subset=["value"])
+        fig=go.Figure()
+        for hand in HANDS:
+            sub=vals[vals["batting_hand"]==hand].set_index("phase").reindex(PHASES).reset_index()
+            if sub["value"].notna().any():
+                fig.add_trace(go.Bar(x=sub["phase"],y=sub["value"],name=short_hand(hand),marker_color=HAND_COLORS[hand],text=[fmt_metric(v,metric) if pd.notna(v) else "" for v in sub["value"]],textposition="outside",cliponaxis=False))
+        style_fig(fig,360,legend=True); fig.update_layout(barmode="group")
+        fig.update_xaxes(title="Match phase"); fig.update_yaxes(title=readable_axis_label(metric),rangemode="tozero")
+        best=vals.loc[vals["value"].idxmax()]
+        render_head(head,"grid","2 · When do batters score best?",f"{best['phase']} is the strongest phase at {fmt_metric(best['value'],metric)}",f"Direct comparison of Powerplay, Middle and Death · Measure: {metric}")
+        show_chart(fig,"chart_heatmap")
 
 
 def render_lollipop(g):
     with module("lolli"):
-        head = st.empty()
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            season = chart_season("lolli", g["season"])
-        with c2:
-            metric = st.selectbox("Metric", ["Runs", "Sixes", "Strike rate"], key="lolli_metric")
-        with c3:
-            extra = st.number_input("Min balls", 0, 5000, 0, 25, key="lolli_minballs",
-                                    help="Applied on top of the global minimum.")
-        min_balls = max(g["min_balls"], int(extra))
-        es = entry_stats(season, g["hand"], min_balls, g["min_runs"])
-        if es.empty:
-            render_head(head, "pulse", "Batter role · entry position", "No entry-position pattern for these filters")
-            empty_state()
-            return
-
-        grp = es.groupby("entry_group").agg(
-            runs=("runs", "sum"), balls=("balls", "sum"), sixes=("sixes", "sum"),
-            innings=("innings", "sum"), batters=("batters", "sum"),
-        ).reindex(ENTRY_ORDER).fillna(0).reset_index()
-        grp["sr"] = ratio(grp["runs"], grp["balls"], 100)
-        col = {"Runs": "runs", "Sixes": "sixes", "Strike rate": "sr"}[metric]
-        grp = grp.dropna(subset=[col])
-        if grp.empty or grp["innings"].sum() == 0:
-            render_head(head, "pulse", "Batter role · entry position", "No entry-position pattern for these filters")
-            empty_state()
-            return
-
-        best_idx = grp[col].idxmax()
-        colors = [PINK if i == best_idx else CYAN for i in grp.index]
-        sx, sy = [], []
-        for e, v in zip(grp["entry_group"], grp[col]):
-            sx += [e, e, None]
-            sy += [0, v, None]
-        fmt = (lambda v: f"{v:.1f}") if metric == "Strike rate" else (lambda v: f"{v:,.0f}")
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=sx, y=sy, mode="lines", line=dict(color="rgba(148,163,184,.45)", width=3),
-                                 hoverinfo="skip", showlegend=False))
-        fig.add_trace(go.Scatter(
-            x=grp["entry_group"], y=grp[col], mode="markers+text", showlegend=False,
-            marker=dict(size=24, color=colors, line=dict(color="#061225", width=3)),
-            text=[f"<b>{fmt(v)}</b><br>n={int(n):,}" for v, n in zip(grp[col], grp["innings"])],
-            textposition="top center", textfont=dict(size=11, color="#E2E8F0"),
-            customdata=np.column_stack([grp["runs"], grp["sixes"], grp["sr"], grp["innings"], grp["batters"]]),
-            hovertemplate="<b>Entry No. %{x}</b><br>Runs: %{customdata[0]:,.0f}<br>Sixes: %{customdata[1]:,.0f}<br>"
-                          "Strike rate: %{customdata[2]:.1f}<br>Batter-innings: %{customdata[3]:,.0f}<br>"
-                          "Batters: %{customdata[4]:,.0f}<extra></extra>",
-        ))
-        if metric == "Strike rate":
-            pooled_sr = sdiv(grp["runs"].sum() * 100, grp["balls"].sum())
-            if np.isfinite(pooled_sr):
-                fig.add_hline(y=pooled_sr, line_dash="dot", line_color=AMBER,
-                              annotation_text=f"Pool SR {pooled_sr:.1f}", annotation_position="top left",
-                              annotation_font=dict(color=AMBER, size=10))
-        style_fig(fig, 330, legend=False)
-        fig.update_xaxes(type="category", categoryorder="array", categoryarray=ENTRY_ORDER,
-                         tickvals=ENTRY_ORDER, ticktext=[f"No. {e}" for e in ENTRY_ORDER], showgrid=False)
-        fig.update_yaxes(range=[0, grp[col].max() * 1.3], title=metric)
-
-        b = grp.loc[best_idx]
-        if metric == "Runs":
-            title = f"Batters entering at No. {b['entry_group']} produce the most runs ({b[col]:,.0f})"
-        elif metric == "Sixes":
-            title = f"Batters entering at No. {b['entry_group']} hit the most sixes ({b[col]:,.0f})"
-        else:
-            title = f"Batters entering at No. {b['entry_group']} score fastest ({b[col]:.1f} SR)"
-        sub = (f"{metric} by batting entry position · {int(grp['innings'].sum()):,} batter-innings · "
-               f"{int(es['batters'].sum()):,} batters · minimum {min_balls} legal balls per batter")
-        render_head(head, "pulse", "Batter role · entry position", title, sub)
-        show_chart(fig, "chart_lollipop")
+        head=st.empty(); c1,c2,c3=st.columns(3)
+        with c1: season=chart_season("lolli",g["season"])
+        with c2: metric=st.selectbox("Measure",["Runs","Sixes","Strike rate"],key="lolli_metric")
+        with c3: extra=st.number_input("Extra minimum balls",0,5000,0,25,key="lolli_minballs")
+        min_balls=max(g["min_balls"],int(extra)); es=entry_stats(season,g["hand"],min_balls,g["min_runs"])
+        if es.empty: render_head(head,"pulse","3 · Does batting position matter?","No entry-position data for these filters"); empty_state(); return
+        grp=es.groupby("entry_group").agg(runs=("runs","sum"),balls=("balls","sum"),sixes=("sixes","sum"),innings=("innings","sum"),batters=("batters","sum")).reindex(ENTRY_ORDER).fillna(0).reset_index(); grp["sr"]=ratio(grp["runs"],grp["balls"],100)
+        col={"Runs":"runs","Sixes":"sixes","Strike rate":"sr"}[metric]; plot=grp.dropna(subset=[col]).sort_values(col,ascending=True)
+        fig=go.Figure()
+        fig.add_trace(go.Scatter(x=plot[col],y=[f"No. {x}" for x in plot["entry_group"]],mode="markers+text",name=metric,marker=dict(size=18,color=[PINK if v==plot[col].max() else CYAN for v in plot[col]]),text=[f"{v:.1f}" if metric=="Strike rate" else f"{v:,.0f}" for v in plot[col]],textposition="middle right",cliponaxis=False,customdata=np.column_stack([plot["runs"],plot["sixes"],plot["sr"],plot["innings"]]),hovertemplate="<b>%{y}</b><br>"+esc(metric)+": %{x}<br>Runs: %{customdata[0]:,.0f}<br>Sixes: %{customdata[1]:,.0f}<br>Strike rate: %{customdata[2]:.1f}<br>Batter-innings: %{customdata[3]:,.0f}<extra></extra>"))
+        style_fig(fig,350,legend=False); fig.update_xaxes(title=readable_axis_label(metric),rangemode="tozero"); fig.update_yaxes(title="Batting entry position",showgrid=False)
+        best=grp.loc[grp[col].idxmax()]; render_head(head,"pulse","3 · Does batting position matter?",f"No. {best['entry_group']} has the highest {metric.lower()}",f"No. 1 = opener · compare how batting output changes by entry position")
+        show_chart(fig,"chart_lollipop")
 
 
 def render_scatter(g):
     with module("scatter"):
-        head = st.empty()
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            season = chart_season("scat", g["season"])
-        with c2:
-            extra_b = st.number_input("Min balls", 0, 5000, 0, 25, key="scat_minballs",
-                                      help="Applied on top of the global minimum.")
-        with c3:
-            extra_r = st.number_input("Min runs", 0, 10000, 0, 25, key="scat_minruns",
-                                      help="Applied on top of the global minimum.")
-        with c4:
-            hands = chart_hands("scat", g["hand"])
-
-        min_balls, min_runs = max(g["min_balls"], int(extra_b)), max(g["min_runs"], int(extra_r))
-        pool = batter_pool(season, "All", min_balls, min_runs)
-        if not pool.empty:
-            pool = pool[pool["batting_hand"].isin(hands + ["Unknown"] if hands else [])]
-            if not hands:
-                pool = pool.iloc[0:0]
-        if pool.empty:
-            render_head(head, "target", "Elite batter map", "No batters qualify for this map")
-            empty_state()
-            return
-
-        lg = league_baseline(season)
-        sizeref = 2.0 * pool["balls"].max() / (40.0 ** 2)
-        top_labels = set(pool.nlargest(10, "runs")["batter"])
-        fig = go.Figure()
-        xmax = pool["avg"].max() * 1.08
-        xmin = max(0, pool["avg"].min() * 0.85)
-        ymax = pool["sr"].max() * 1.04
-        ymin = pool["sr"].min() * 0.96
-        if np.isfinite(lg["avg"]) and np.isfinite(lg["sr"]):
-            fig.add_shape(type="rect", x0=lg["avg"], x1=xmax, y0=lg["sr"], y1=ymax, xref="x", yref="y",
-                          fillcolor="rgba(34,211,238,.06)", line=dict(color="rgba(34,211,238,.25)", width=1, dash="dot"))
-        for hand in HANDS + ["Unknown"]:
-            sub = pool[pool["batting_hand"] == hand]
-            if sub.empty:
-                continue
-            fig.add_trace(go.Scatter(
-                x=sub["avg"], y=sub["sr"], mode="markers+text", name=hand,
-                marker=dict(size=sub["balls"], sizemode="area", sizeref=sizeref, sizemin=5, opacity=0.82,
-                            color=HAND_COLORS[hand], line=dict(color="rgba(255,255,255,.55)", width=1)),
-                text=[b if b in top_labels else "" for b in sub["batter"]], textposition="top center",
-                textfont=dict(size=10, color="#CBD5E1"),
-                customdata=np.column_stack([sub["batter"], sub["runs"], sub["balls"], sub["outs"], sub["fours"], sub["sixes"]]),
-                hovertemplate="<b>%{customdata[0]}</b><br>Runs: %{customdata[1]:,.0f}<br>Balls: %{customdata[2]:,.0f}<br>"
-                              "Dismissals: %{customdata[3]:,.0f}<br>Average: %{x:.2f}<br>Strike rate: %{y:.1f}<br>"
-                              "Fours: %{customdata[4]:,.0f} · Sixes: %{customdata[5]:,.0f}<extra></extra>",
-            ))
-        if np.isfinite(lg["sr"]):
-            fig.add_hline(y=lg["sr"], line_dash="dot", line_color=AMBER, annotation_text=f"League SR {lg['sr']:.1f}",
-                          annotation_position="bottom right", annotation_font=dict(color=AMBER, size=10))
-        if np.isfinite(lg["avg"]):
-            fig.add_vline(x=lg["avg"], line_dash="dot", line_color=AMBER, annotation_text=f"League avg {lg['avg']:.1f}",
-                          annotation_position="top left", annotation_font=dict(color=AMBER, size=10))
-        style_fig(fig, 380)
-        fig.update_xaxes(title="Batting average", range=[xmin, xmax])
-        fig.update_yaxes(title="Strike rate", range=[ymin, ymax])
-
-        elite = pool[(pool["avg"] > lg["avg"]) & (pool["sr"] > lg["sr"])] if np.isfinite(lg["avg"]) and np.isfinite(lg["sr"]) else pool.iloc[0:0]
-        if elite.empty:
-            title = "No batter clears both league benchmarks at this sample size"
-        else:
-            lead = elite.loc[elite["runs"].idxmax()]
-            title = f"{len(elite)} batters beat the league on both strike rate and average — led by {lead['batter']}"
-        sub = (f"Each bubble is one batter, sized by legal balls · {len(pool)} batters · "
-               f"minimum {min_balls} balls and {min_runs} runs · shaded zone = above league on both")
-        render_head(head, "target", "Elite batter map", title, sub)
-        show_chart(fig, "chart_scatter")
+        head=st.empty(); c1,c2,c3,c4=st.columns(4)
+        with c1: season=chart_season("scat",g["season"])
+        with c2: extra_b=st.number_input("Extra minimum balls",0,5000,0,25,key="scat_minballs")
+        with c3: extra_r=st.number_input("Extra minimum runs",0,10000,0,25,key="scat_minruns")
+        with c4: hands=chart_hands("scat",g["hand"])
+        min_balls=max(g["min_balls"],int(extra_b)); min_runs=max(g["min_runs"],int(extra_r)); pool=batter_pool(season,"All",min_balls,min_runs)
+        if not pool.empty: pool=pool[pool["batting_hand"].isin(hands+["Unknown"] if hands else [])]
+        if pool.empty: render_head(head,"target","4 · Which batters are both fast and consistent?","No batters qualify for this sample"); empty_state(); return
+        lg=league_baseline(season); fig=go.Figure()
+        sizeref=2*pool["balls"].max()/(34**2); labels=set(pool.nlargest(8,"runs")["batter"])
+        for hand in HANDS+["Unknown"]:
+            sub=pool[pool["batting_hand"]==hand]
+            if sub.empty: continue
+            fig.add_trace(go.Scatter(x=sub["avg"],y=sub["sr"],mode="markers+text",name=short_hand(hand),marker=dict(size=sub["balls"],sizemode="area",sizeref=sizeref,sizemin=6,opacity=.82,color=HAND_COLORS[hand],line=dict(color="#fff",width=1)),text=[b if b in labels else "" for b in sub["batter"]],textposition="top center",customdata=np.column_stack([sub["batter"],sub["runs"],sub["balls"]]),hovertemplate="<b>%{customdata[0]}</b><br>Average: %{x:.1f}<br>Strike rate: %{y:.1f}<br>Runs: %{customdata[1]:,.0f}<br>Legal balls: %{customdata[2]:,.0f}<extra></extra>"))
+        if np.isfinite(lg["avg"]): fig.add_vline(x=lg["avg"],line_dash="dot",line_color=AMBER,annotation_text=f"League average {lg['avg']:.1f}",annotation_position="top left")
+        if np.isfinite(lg["sr"]): fig.add_hline(y=lg["sr"],line_dash="dot",line_color=AMBER,annotation_text=f"League SR {lg['sr']:.1f}",annotation_position="bottom right")
+        style_fig(fig,390,legend=True); fig.update_xaxes(title="Batting average (runs per dismissal)"); fig.update_yaxes(title="Strike rate (runs per 100 balls)")
+        elite=pool[(pool["avg"]>lg["avg"])&(pool["sr"]>lg["sr"])] if np.isfinite(lg["avg"]) and np.isfinite(lg["sr"]) else pool.iloc[0:0]
+        lead=elite.loc[elite["runs"].idxmax()] if not elite.empty else None
+        title=f"{len(elite)} batters beat both league benchmarks"+(f" — {lead['batter']} leads them" if lead is not None else "")
+        render_head(head,"target","4 · Which batters are both fast and consistent?",title,"Each bubble is one batter · bigger bubble = more legal balls · upper-right = stronger overall profile")
+        show_chart(fig,"chart_scatter")
 
 
 def render_treemap(g):
     with module("tree"):
-        head = st.empty()
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            season = chart_season("tree", g["season"])
-        with c2:
-            metric = st.selectbox("Size metric", ["Runs", "Balls faced", "Sixes"], key="tree_metric")
-        with c3:
-            extra = st.number_input("Min balls", 0, 5000, 0, 25, key="tree_minballs",
-                                    help="Applied on top of the global minimum.")
-        min_balls = max(g["min_balls"], int(extra))
-        es = entry_stats(season, g["hand"], min_balls, g["min_runs"])
-        es = es[es["batting_hand"].isin(HANDS)] if not es.empty else es
-        size_col = {"Runs": "runs", "Balls faced": "balls", "Sixes": "sixes"}[metric]
-        if not es.empty:
-            es = es[es[size_col] > 0]
-        if es.empty:
-            render_head(head, "grid", "Role map", "No role distribution for these filters")
-            empty_state()
-            return
+        head=st.empty(); c1,c2,c3=st.columns(3)
+        with c1: season=chart_season("tree",g["season"])
+        with c2: metric=st.selectbox("What should we rank?",["Runs","Balls faced","Sixes"],key="tree_metric")
+        with c3: extra=st.number_input("Extra minimum balls",0,5000,0,25,key="tree_minballs")
+        min_balls=max(g["min_balls"],int(extra)); es=entry_stats(season,g["hand"],min_balls,g["min_runs"])
+        if es.empty: render_head(head,"grid","5 · Which batting roles produce the most?","No role data for these filters"); empty_state(); return
+        size={"Runs":"runs","Balls faced":"balls","Sixes":"sixes"}[metric]; grp=es.groupby(["batting_hand","entry_group"],as_index=False).agg(value=(size,"sum"),runs=("runs","sum"),balls=("balls","sum"),batters=("batters","sum")); grp["role"]=grp.apply(lambda r:f"{short_hand(r['batting_hand'])} · No. {r['entry_group']}",axis=1); plot=grp.nlargest(8,"value").sort_values("value")
+        fig=go.Figure(go.Bar(x=plot["value"],y=plot["role"],orientation="h",marker_color=[HAND_COLORS.get(h,CYAN) for h in plot["batting_hand"]],text=[f"{v:,.0f}" for v in plot["value"]],textposition="outside",cliponaxis=False,customdata=np.column_stack([plot["runs"],plot["balls"],plot["batters"]]),hovertemplate="<b>%{y}</b><br>"+esc(metric)+": %{x:,.0f}<br>Runs: %{customdata[0]:,.0f}<br>Legal balls: %{customdata[1]:,.0f}<br>Batters: %{customdata[2]:,.0f}<extra></extra>"))
+        style_fig(fig,370,legend=False); fig.update_xaxes(title=readable_axis_label(metric),rangemode="tozero"); fig.update_yaxes(title="Batting role (hand + entry)",showgrid=False)
+        best=grp.loc[grp["value"].idxmax()]; render_head(head,"grid","5 · Which batting roles produce the most?",f"{best['role']} leads in {metric.lower()}","Top 8 combinations of batting hand and entry position · longer bar = larger contribution")
+        show_chart(fig,"chart_treemap")
 
-        ids, labels, parents, values, colors, texts, custom = [], [], [], [], [], [], []
-        for hand, sub in es.groupby("batting_hand"):
-            sr_h = sdiv(sub["runs"].sum() * 100, sub["balls"].sum())
-            ids.append(hand); labels.append(hand); parents.append("")
-            values.append(float(sub[size_col].sum())); colors.append(sr_h)
-            texts.append(f"{sub[size_col].sum():,.0f} · SR {fnum(sr_h, 1)}")
-            custom.append([int(sub["batters"].sum()), float(sub["balls"].sum()), float(sub["runs"].sum()), sr_h])
-            for _, r in sub.iterrows():
-                sr_l = sdiv(r["runs"] * 100, r["balls"])
-                ids.append(f"{hand}|{r['entry_group']}"); labels.append(f"No. {r['entry_group']}")
-                parents.append(hand); values.append(float(r[size_col])); colors.append(sr_l)
-                texts.append(f"{r[size_col]:,.0f} · SR {fnum(sr_l, 1)}")
-                custom.append([int(r["batters"]), float(r["balls"]), float(r["runs"]), sr_l])
-        finite = [c for c in colors if np.isfinite(c)]
-        fig = go.Figure(go.Treemap(
-            ids=ids, labels=labels, parents=parents, values=values, text=texts, branchvalues="total",
-            texttemplate="<b>%{label}</b><br>%{text}", customdata=custom,
-            marker=dict(colors=[c if np.isfinite(c) else 0 for c in colors], colorscale=NEON_SCALE,
-                        cmin=min(finite) if finite else 0, cmax=max(finite) if finite else 1,
-                        line=dict(width=2, color="#061225"),
-                        colorbar=dict(title=dict(text="SR", font=dict(color=MUTED)), thickness=10,
-                                      outlinewidth=0, tickfont=dict(color=MUTED))),
-            tiling=dict(pad=4), textfont=dict(color="#F8FAFC", size=13),
-            hovertemplate="<b>%{label}</b><br>" + metric + ": %{value:,.0f}<br>Batters: %{customdata[0]:,.0f}<br>"
-                          "Balls: %{customdata[1]:,.0f}<br>Runs: %{customdata[2]:,.0f}<br>"
-                          "Strike rate: %{customdata[3]:.1f}<extra></extra>",
-        ))
-        style_fig(fig, 380, legend=False)
 
-        leaf = es.loc[es[size_col].idxmax()]
-        share = leaf[size_col] * 100 / es[size_col].sum()
-        mtxt = {"Runs": "runs", "Balls faced": "balls faced", "Sixes": "sixes"}[metric]
-        title = f"{short_hand(leaf['batting_hand']).capitalize()} batters at No. {leaf['entry_group']} supply the biggest share of {mtxt} ({share:.0f}%)"
-        sub = (f"Size = {metric.lower()} · colour = strike rate · {int(es['batters'].sum()):,} batters across "
-               f"{len(es)} role cells · minimum {min_balls} legal balls")
-        render_head(head, "grid", "Role map · hand → entry", title, sub)
-        show_chart(fig, "chart_treemap")
+
+def render_top_runs(g):
+    with module("topruns"):
+        head=st.empty(); c1,c2=st.columns([1,1])
+        with c1: season=chart_season("topruns",g["season"])
+        with c2: top_n=int(st.slider("How many batters",5,15,10,key="topruns_n"))
+        pool=batter_pool(season,g["hand"],g["min_balls"],g["min_runs"])
+        if pool.empty: render_head(head,"chart","1 · Who scores the most runs?","No qualifying batters"); empty_state(); return
+        plot=pool.nlargest(top_n,"runs").sort_values("runs")
+        fig=go.Figure(go.Bar(x=plot["runs"],y=plot["batter"],orientation="h",marker_color=CYAN,text=[f"{v:,.0f}" for v in plot["runs"]],textposition="outside",cliponaxis=False,customdata=np.column_stack([plot["sr"],plot["balls"],plot["innings"]]),hovertemplate="<b>%{y}</b><br>Total runs: %{x:,.0f}<br>Strike rate: %{customdata[0]:.1f}<br>Legal balls: %{customdata[1]:,.0f}<br>Innings: %{customdata[2]:,.0f}<extra></extra>"))
+        style_fig(fig,390,False); fig.update_xaxes(title="Total runs scored",rangemode="tozero"); fig.update_yaxes(title="Batter",showgrid=False)
+        best=pool.loc[pool["runs"].idxmax()]
+        render_head(head,"chart","1 · Who scores the most runs?",f"{best['batter']} leads the selected batter pool",f"Top {top_n} batters by total runs · each bar represents one batter")
+        show_chart(fig,"chart_top_runs")
+
+
+def render_top_strike_rate(g):
+    with module("topsr"):
+        head=st.empty(); c1,c2=st.columns([1,1])
+        with c1: season=chart_season("topsr",g["season"])
+        with c2: top_n=int(st.slider("How many batters",5,15,10,key="topsr_n"))
+        pool=batter_pool(season,g["hand"],g["min_balls"],g["min_runs"])
+        if pool.empty: render_head(head,"pulse","2 · Who scores fastest?","No qualifying batters"); empty_state(); return
+        plot=pool.nlargest(top_n,"sr").sort_values("sr")
+        fig=go.Figure(go.Scatter(x=plot["sr"],y=plot["batter"],mode="markers+text",marker=dict(size=17,color=VIOLET,line=dict(color="#fff",width=1)),text=[f"{v:.1f}" for v in plot["sr"]],textposition="middle right",cliponaxis=False,customdata=np.column_stack([plot["runs"],plot["balls"],plot["avg"]]),hovertemplate="<b>%{y}</b><br>Strike rate: %{x:.1f}<br>Runs: %{customdata[0]:,.0f}<br>Legal balls: %{customdata[1]:,.0f}<br>Average: %{customdata[2]:.1f}<extra></extra>"))
+        style_fig(fig,390,False); fig.update_xaxes(title="Strike rate (runs per 100 balls)",rangemode="tozero"); fig.update_yaxes(title="Batter",showgrid=False)
+        best=pool.loc[pool["sr"].idxmax()]
+        render_head(head,"pulse","2 · Who scores fastest?",f"{best['batter']} has the highest strike rate in this pool",f"Top {top_n} qualifying batters · minimum {g['min_balls']} legal balls and {g['min_runs']} runs")
+        show_chart(fig,"chart_top_sr")
+
+
+def render_consistency_map(g):
+    with module("consistency"):
+        head=st.empty(); c1,c2=st.columns(2)
+        with c1: season=chart_season("consistency",g["season"])
+        with c2: hands=chart_hands("consistency",g["hand"])
+        pool=batter_pool(season,"All",g["min_balls"],g["min_runs"])
+        if hands: pool=pool[pool["batting_hand"].isin(hands)]
+        if pool.empty: render_head(head,"target","3 · Who is both consistent and aggressive?","No qualifying batters"); empty_state(); return
+        lg=league_baseline(season); fig=go.Figure()
+        for hand in HANDS+["Unknown"]:
+            sub=pool[pool["batting_hand"]==hand]
+            if sub.empty: continue
+            sizeref=max(1,2*sub["balls"].max()/(28**2)); labels=set(sub.nlargest(6,"runs")["batter"])
+            fig.add_trace(go.Scatter(x=sub["avg"],y=sub["sr"],mode="markers+text",name=short_hand(hand),marker=dict(size=sub["balls"],sizemode="area",sizeref=sizeref,sizemin=6,opacity=.82,color=HAND_COLORS.get(hand,MUTED),line=dict(color="#fff",width=1)),text=[n if n in labels else "" for n in sub["batter"]],textposition="top center",customdata=np.column_stack([sub["runs"],sub["balls"]]),hovertemplate="<b>%{text}</b><br>Average: %{x:.1f}<br>Strike rate: %{y:.1f}<br>Runs: %{customdata[0]:,.0f}<br>Legal balls: %{customdata[1]:,.0f}<extra></extra>"))
+        if np.isfinite(lg["avg"]): fig.add_vline(x=lg["avg"],line_dash="dot",line_color=AMBER,annotation_text=f"League average {lg['avg']:.1f}",annotation_position="top left")
+        if np.isfinite(lg["sr"]): fig.add_hline(y=lg["sr"],line_dash="dot",line_color=AMBER,annotation_text=f"League SR {lg['sr']:.1f}",annotation_position="bottom right")
+        style_fig(fig,430,True); fig.update_xaxes(title="Batting average (runs per dismissal)"); fig.update_yaxes(title="Strike rate (runs per 100 balls)")
+        elite=pool[(pool["avg"]>=lg["avg"])&(pool["sr"]>=lg["sr"])] if np.isfinite(lg["avg"]) and np.isfinite(lg["sr"]) else pool.iloc[0:0]
+        render_head(head,"target","3 · Who is both consistent and aggressive?",f"{len(elite)} batters are at or above both league benchmarks","Each bubble is one batter · bigger bubble = more legal balls · upper-right is the strongest zone")
+        show_chart(fig,"chart_consistency")
+
+
+def render_phase_overview(g):
+    with module("phaseall"):
+        head=st.empty(); c1,c2=st.columns(2)
+        with c1: season=chart_season("phaseall",g["season"])
+        with c2: metric=st.selectbox("What should we compare?",["Strike rate","Runs","Dot-ball %"],key="phaseall_metric")
+        pool=batter_pool(season,g["hand"],g["min_balls"],g["min_runs"])
+        if pool.empty: render_head(head,"grid","4 · When do IPL batters score best?","No qualifying batters"); empty_state(); return
+        ph=filter_season(DATA.phase,season); ph=ph[ph["batter"].isin(pool["batter"])]
+        agg=ph.groupby("phase",as_index=False).agg(runs=("runs","sum"),balls=("balls","sum"),dots=("dots","sum")); vals=phase_metric_values(agg,metric); vals["phase"]=pd.Categorical(vals["phase"],PHASES,ordered=True); vals=vals.sort_values("phase")
+        fig=go.Figure(go.Bar(x=vals["phase"].astype(str),y=vals["value"],marker_color=[VIOLET,CYAN,PINK],text=[fmt_metric(v,metric) for v in vals["value"]],textposition="outside",cliponaxis=False))
+        style_fig(fig,370,False); fig.update_xaxes(title="Match phase"); fig.update_yaxes(title=readable_axis_label(metric),rangemode="tozero")
+        best=vals.loc[vals["value"].idxmax()]
+        render_head(head,"grid","4 · When do IPL batters score best?",f"{best['phase']} is the strongest phase",f"All qualifying batters combined · measure: {metric}")
+        show_chart(fig,"chart_phase_all")
+
+
+def render_entry_overview(g):
+    with module("entryall"):
+        head=st.empty(); c1,c2=st.columns(2)
+        with c1: season=chart_season("entryall",g["season"])
+        with c2: metric=st.selectbox("What should we rank?",["Runs","Sixes","Strike rate"],key="entryall_metric")
+        es=entry_stats(season,g["hand"],g["min_balls"],g["min_runs"])
+        if es.empty: render_head(head,"pulse","5 · Does batting position change output?","No entry-position data"); empty_state(); return
+        grp=es.groupby("entry_group",as_index=False).agg(runs=("runs","sum"),balls=("balls","sum"),sixes=("sixes","sum"),innings=("innings","sum"),batters=("batters","sum")); grp["sr"]=ratio(grp["runs"],grp["balls"],100); grp["entry_order"]=grp["entry_group"].map({str(i):i for i in range(1,5)}).fillna(5); grp=grp.sort_values("entry_order")
+        col={"Runs":"runs","Sixes":"sixes","Strike rate":"sr"}[metric]
+        fig=go.Figure(go.Bar(x=[f"No. {x}" for x in grp["entry_group"]],y=grp[col],marker_color=CYAN,text=[f"{v:.1f}" if metric=="Strike rate" else f"{v:,.0f}" for v in grp[col]],textposition="outside",cliponaxis=False,customdata=np.column_stack([grp["runs"],grp["sixes"],grp["sr"],grp["batters"]]),hovertemplate="<b>%{x}</b><br>"+esc(metric)+": %{y}<br>Runs: %{customdata[0]:,.0f}<br>Sixes: %{customdata[1]:,.0f}<br>Strike rate: %{customdata[2]:.1f}<br>Batters: %{customdata[3]:,.0f}<extra></extra>"))
+        style_fig(fig,370,False); fig.update_xaxes(title="Batting entry position"); fig.update_yaxes(title=readable_axis_label(metric),rangemode="tozero")
+        best=grp.loc[grp[col].idxmax()]
+        render_head(head,"pulse","5 · Does batting position change output?",f"No. {best['entry_group']} leads in {metric.lower()}","No. 1 = opener · No. 5+ groups later-entry batters together")
+        show_chart(fig,"chart_entry_all")
+
+
+def render_hand_overview(g):
+    with module("handall"):
+        head=st.empty(); c1,c2=st.columns(2)
+        with c1: season=chart_season("handall",g["season"])
+        with c2: metric=st.selectbox("Compare by",["Strike rate","Batting average","Runs per batter"],key="handall_metric")
+        pool=batter_pool(season,"All",g["min_balls"],g["min_runs"])
+        if pool.empty: render_head(head,"chart","6 · Does batting hand make a difference?","No qualifying batters"); empty_state(); return
+        h=pool[pool["batting_hand"].isin(HANDS)].groupby("batting_hand",as_index=False).agg(runs=("runs","sum"),batters=("batter","nunique"),balls=("balls","sum"),sr=("sr","mean"),avg=("avg","mean")); h["runs_per_batter"]=h["runs"]/h["batters"]
+        col={"Strike rate":"sr","Batting average":"avg","Runs per batter":"runs_per_batter"}[metric]
+        fig=go.Figure(go.Bar(x=h["batting_hand"].map(short_hand),y=h[col],marker_color=[HAND_COLORS[x] for x in h["batting_hand"]],text=[f"{v:.1f}" for v in h[col]],textposition="outside",cliponaxis=False,customdata=np.column_stack([h["batters"],h["runs"],h["balls"]]),hovertemplate="<b>%{x}</b><br>"+esc(metric)+": %{y:.1f}<br>Batters: %{customdata[0]:,.0f}<br>Total runs: %{customdata[1]:,.0f}<br>Legal balls: %{customdata[2]:,.0f}<extra></extra>"))
+        style_fig(fig,360,False); fig.update_xaxes(title="Batting hand"); fig.update_yaxes(title=readable_axis_label("Strike rate" if metric=="Strike rate" else ("Batting average" if metric=="Batting average" else "Runs")),rangemode="tozero")
+        winner=h.loc[h[col].idxmax()]
+        render_head(head,"chart","6 · Does batting hand make a difference?",f"{short_hand(winner['batting_hand'])} leads on {metric.lower()}","Average result per batter for the selected population · this is an association, not a cause-and-effect test")
+        show_chart(fig,"chart_hand_all")
+
+
+def render_season_overview(g):
+    with module("seasonall"):
+        head=st.empty(); c1,c2=st.columns(2)
+        with c1: metric=st.selectbox("Trend measure",["Total runs","Average strike rate","Total sixes"],key="seasonall_metric")
+        with c2: _=st.caption("Uses the current global batter filters")
+        inn=DATA.inn.copy()
+        if g["hand"]!="All": inn=inn[inn["batting_hand"]==g["hand"]]
+        if g["season"]!="All": inn=inn[inn["season"]==g["season"]]
+        if inn.empty: render_head(head,"chart","7 · How has batting changed across IPL seasons?","No data for these filters"); empty_state(); return
+        if metric=="Total runs": t=inn.groupby("season",as_index=False)["runs"].sum(); col="runs"; label="Total runs"
+        elif metric=="Total sixes": t=inn.groupby("season",as_index=False)["sixes"].sum(); col="sixes"; label="Total sixes"
+        else: t=inn.groupby("season",as_index=False).agg(runs=("runs","sum"),balls=("balls","sum")); t["sr"]=ratio(t["runs"],t["balls"],100); col="sr"; label="Average strike rate"
+        t=t.sort_values("season")
+        fig=go.Figure(go.Scatter(x=t["season"],y=t[col],mode="lines+markers+text",line=dict(color=CYAN,width=4),marker=dict(size=9,color=VIOLET),text=[f"{v:,.1f}" if metric=="Average strike rate" else f"{v:,.0f}" for v in t[col]],textposition="top center",fill="tozeroy",fillcolor="rgba(34,211,238,.07)"))
+        style_fig(fig,370,False); fig.update_xaxes(title="IPL season",showgrid=False); fig.update_yaxes(title=label,rangemode="tozero")
+        peak=t.loc[t[col].idxmax()]
+        render_head(head,"chart","7 · How has batting changed across IPL seasons?",f"Peak {label.lower()}: {peak['season']}","Season-by-season trend across the selected batter population")
+        show_chart(fig,"chart_season_all")
+
+
+def render_sixes_overview(g):
+    with module("sixesall"):
+        head=st.empty(); c1,c2=st.columns(2)
+        with c1: season=chart_season("sixesall",g["season"])
+        with c2: top_n=int(st.slider("How many batters",5,15,10,key="sixesall_n"))
+        pool=batter_pool(season,g["hand"],g["min_balls"],g["min_runs"])
+        if pool.empty: render_head(head,"bolt","8 · Who hits the most sixes?","No qualifying batters"); empty_state(); return
+        plot=pool.nlargest(top_n,"sixes").sort_values("sixes")
+        fig=go.Figure(go.Bar(x=plot["sixes"],y=plot["batter"],orientation="h",marker_color=PINK,text=[f"{v:,.0f}" for v in plot["sixes"]],textposition="outside",cliponaxis=False,customdata=np.column_stack([plot["runs"],plot["sr"]]),hovertemplate="<b>%{y}</b><br>Sixes: %{x:,.0f}<br>Runs: %{customdata[0]:,.0f}<br>Strike rate: %{customdata[1]:.1f}<extra></extra>"))
+        style_fig(fig,390,False); fig.update_xaxes(title="Sixes hit",rangemode="tozero"); fig.update_yaxes(title="Batter",showgrid=False)
+        best=pool.loc[pool["sixes"].idxmax()]
+        render_head(head,"bolt","8 · Who hits the most sixes?",f"{best['batter']} leads the six-hitting chart","Top qualifying batters · easy to compare power hitting at a glance")
+        show_chart(fig,"chart_sixes_all")
+
+
+def render_dismissals_overview(g):
+    with module("dismissall"):
+        head=st.empty(); season=chart_season("dismissall",g["season"])
+        pool=batter_pool(season,g["hand"],g["min_balls"],g["min_runs"])
+        if pool.empty: render_head(head,"shield","9 · How are IPL batters usually dismissed?","No qualifying batters"); empty_state(); return
+        dis=DATA.dis[DATA.dis["batter"].isin(pool["batter"])]; dis=filter_season(dis,season)
+        grp=dis.groupby("kind",as_index=False)["n"].sum().sort_values("n",ascending=True)
+        if grp.empty: render_head(head,"shield","9 · How are IPL batters usually dismissed?","No dismissal data"); empty_state(); return
+        total=grp["n"].sum(); grp["share"]=grp["n"]*100/total
+        fig=go.Figure(go.Bar(x=grp["share"],y=grp["kind"],orientation="h",marker_color=PALETTE[:len(grp)],text=[f"{p:.1f}%" for p in grp["share"]],textposition="outside",cliponaxis=False,customdata=grp[["n"]],hovertemplate="<b>%{y}</b><br>Share: %{x:.1f}%<br>Dismissals: %{customdata[0]:,.0f}<extra></extra>"))
+        style_fig(fig,370,False); fig.update_xaxes(title="Share of dismissals (%)",rangemode="tozero"); fig.update_yaxes(title="Dismissal type",showgrid=False)
+        top=grp.iloc[-1]
+        render_head(head,"shield","9 · How are IPL batters usually dismissed?",f"{top['kind']} is the most common dismissal",f"All qualifying batters combined · {int(total):,} dismissals")
+        show_chart(fig,"chart_dismiss_all")
 
 
 def render_universe_tab():
     render_universe_header()
     render_ticker()
     with bar_container("global"):
-        html('<div class="bar-title">Global filters · define the batter pool</div>')
-        f1, f2, f3, f4 = st.columns(4)
-        with f1:
-            season = st.selectbox("Season", ["All"] + SEASONS, key="g_season")
-        with f2:
-            hand = st.selectbox("Batting hand", ["All"] + HANDS, key="g_hand")
-        with f3:
-            min_balls = int(st.number_input("Minimum legal balls", 0, 5000, 250, 25, key="g_min_balls"))
-        with f4:
-            min_runs = int(st.number_input("Minimum runs", 0, 10000, 250, 25, key="g_min_runs"))
-    g = dict(season=season, hand=hand, min_balls=min_balls, min_runs=min_runs)
-
-    pool = batter_pool(season, hand, min_balls, min_runs)
-    hp = hand_phase_table(season, hand, min_balls, min_runs)
-
-    k1, k2, k3 = st.columns(3)
-    with k1:
-        kpi_card("users", "Batters analysed", fnum(len(pool)),
-                 f"of {SCALE['batters']:,} in the database · ≥{min_balls} balls · ≥{min_runs} runs", CYAN)
-    with k2:
-        pr, pb = pool["runs"].sum() if not pool.empty else 0, pool["balls"].sum() if not pool.empty else 0
-        kpi_card("target", "Runs in sample", fnum(pr),
-                 f"{fnum(pb)} legal balls · pooled SR {fnum(sdiv(pr * 100, pb), 1)}", VIOLET)
-    with k3:
-        best_txt, best_note = "—", "No qualifying hand/phase combination"
-        if not hp.empty:
-            hp2 = hp[hp["balls"] > 0].copy()
-            if not hp2.empty:
-                hp2["sr"] = ratio(hp2["runs"], hp2["balls"], 100)
-                b = hp2.loc[hp2["sr"].idxmax()]
-                best_txt = f"{esc(short_hand(b['batting_hand']))} · {esc(b['phase'])}"
-                best_note = f"Highest strike rate: {b['sr']:.1f} across {fnum(b['balls'])} legal balls"
-        kpi_card("bolt", "Best scoring profile", best_txt, best_note, PINK)
-
+        html('<div class="bar-title">Global filters · choose the batter population</div>')
+        f1,f2,f3,f4=st.columns(4)
+        with f1: season=st.selectbox("Season",["All"]+SEASONS,key="g_season")
+        with f2: hand=st.selectbox("Batting hand",["All"]+HANDS,key="g_hand")
+        with f3: min_balls=int(st.number_input("Minimum legal balls",0,5000,250,25,key="g_min_balls"))
+        with f4: min_runs=int(st.number_input("Minimum runs",0,10000,250,25,key="g_min_runs"))
+    g=dict(season=season,hand=hand,min_balls=min_balls,min_runs=min_runs)
+    pool=batter_pool(season,hand,min_balls,min_runs)
+    k1,k2,k3,k4=st.columns(4)
+    with k1: kpi_card("users","Batters in population",fnum(len(pool)),f"of {SCALE['batters']:,} total IPL batters",CYAN)
+    with k2: kpi_card("target","Total runs",fnum(pool["runs"].sum() if not pool.empty else 0),f"Across {fnum(pool['balls'].sum() if not pool.empty else 0)} legal balls",VIOLET)
+    with k3: kpi_card("pulse","Average strike rate",fnum(pool["sr"].mean() if not pool.empty else np.nan,1),"Mean strike rate across qualifying batters",PINK)
+    with k4: kpi_card("bolt","Total sixes",fnum(pool["sixes"].sum() if not pool.empty else 0),"Sixes hit by the selected population",AMBER)
     if pool.empty:
-        empty_state()
-        return
-
-    render_dumbbell(g)
-    a, b = st.columns(2)
-    with a:
-        render_heatmap(g)
-    with b:
-        render_lollipop(g)
-    c, d = st.columns(2)
-    with c:
-        render_scatter(g)
-    with d:
-        render_treemap(g)
+        empty_state("No batters match these filters. Lower the minimum balls or runs."); return
+    render_top_runs(g)
+    a,b=st.columns(2)
+    with a: render_top_strike_rate(g)
+    with b: render_consistency_map(g)
+    c,d=st.columns(2)
+    with c: render_phase_overview(g)
+    with d: render_entry_overview(g)
+    e,f=st.columns(2)
+    with e: render_hand_overview(g)
+    with f: render_season_overview(g)
+    gcol,h=st.columns(2)
+    with gcol: render_sixes_overview(g)
+    with h: render_dismissals_overview(g)
 
 
 # ============================================================
@@ -1753,7 +1548,7 @@ def render_timeline(batter, pdf_all, seasons_p, slug):
         sel = seasons_p[seasons_p.index(lo): seasons_p.index(hi) + 1]
         sub = pdf_all[pdf_all["season"].isin(sel)]
         if sub.empty:
-            render_head(head, "chart", "Performance timeline", "No innings in this season range")
+            render_head(head, "chart", "Runs by season", "No innings in this season range")
             empty_state("No innings recorded in this season range.")
             return
         t = sub.groupby("season", as_index=False).agg(runs=("runs", "sum"), balls=("balls", "sum"))
@@ -1763,7 +1558,7 @@ def render_timeline(batter, pdf_all, seasons_p, slug):
                             "Balls faced": ("balls", "lg_balls", "balls")}[metric]
         t = t.dropna(subset=[vcol])
         if t.empty:
-            render_head(head, "chart", "Performance timeline", "No data for this metric")
+            render_head(head, "chart", "Runs by season", "No data for this metric")
             empty_state()
             return
         dec = 1 if metric == "Strike rate" else 0
@@ -1803,63 +1598,33 @@ def render_timeline(batter, pdf_all, seasons_p, slug):
         else:
             title = f"{batter} peaked in {peak['season']} with {peak[vcol]:,.{dec}f} {unit}"
         sub_txt = f"{metric} per IPL season · {len(t)} seasons · {fnum(t['balls'].sum())} legal balls in range"
-        render_head(head, "chart", "Performance timeline", title, sub_txt)
+        render_head(head, "chart", "Runs by season", title, sub_txt)
         show_chart(fig, "chart_timeline")
 
 
 def render_radar(batter, seasons_p, slug, page_season):
-    with module("radar"):
+    """Readable phase bars: batter versus league baseline."""
+    with module("phase"):
         head = st.empty()
         c1, c2 = st.columns(2)
-        with c1:
-            season = player_chart_season("radar", slug, seasons_p, page_season)
-        with c2:
-            metric = st.selectbox("Metric", PHASE_METRICS, key="radar_metric")
+        with c1: season = player_chart_season("radar", slug, seasons_p, page_season)
+        with c2: metric = st.selectbox("Metric", PHASE_METRICS, key="radar_metric")
         ph = filter_season(D().phase, season)
-        pp = ph[ph["batter"] == batter].groupby("phase")[["runs", "balls", "dots", "outs"]].sum().reindex(PHASES).fillna(0).reset_index()
-        lg = ph.groupby("phase")[["runs", "balls", "dots", "outs"]].sum().reindex(PHASES).fillna(0).reset_index()
+        pp = ph[ph["batter"] == batter].groupby("phase")[["runs","balls","dots","outs"]].sum().reindex(PHASES).fillna(0).reset_index()
+        lg = ph.groupby("phase")[["runs","balls","dots","outs"]].sum().reindex(PHASES).fillna(0).reset_index()
         if pp["balls"].sum() == 0:
-            render_head(head, "target", "Phase scouting radar", "No phase data for this selection")
-            empty_state("No deliveries faced by this batter in the selected season.")
-            return
-        pv = phase_metric_values(pp, metric)
-        lv = phase_metric_values(lg, metric)
-        r_p = pv["value"].fillna(0).tolist()
-        r_l = lv["value"].fillna(0).tolist()
-        theta = PHASES + [PHASES[0]]
+            render_head(head, "target", "Strike rate by phase", "No phase data for this selection"); empty_state(); return
+        pv = phase_metric_values(pp, metric); lv = phase_metric_values(lg, metric)
+        merged = pv[["phase","value"]].rename(columns={"value":"batter_value"}).merge(lv[["phase","value"]].rename(columns={"value":"league_value"}), on="phase")
         fig = go.Figure()
-        fig.add_trace(go.Scatterpolar(
-            r=r_l + [r_l[0]], theta=theta, name="League", mode="lines", line=dict(color=AMBER, width=2, dash="dot"),
-            hovertemplate="League · %{theta}: %{r:.1f}<extra></extra>",
-        ))
-        fig.add_trace(go.Scatterpolar(
-            r=r_p + [r_p[0]], theta=theta, name=batter, fill="toself", fillcolor="rgba(34,211,238,.20)",
-            mode="lines+markers+text", line=dict(color=CYAN, width=3), marker=dict(size=9, color=CYAN),
-            text=[fmt_metric(v, metric) for v in r_p] + [""], textposition="top center",
-            textfont=dict(color="#E2E8F0", size=12),
-            customdata=np.column_stack([list(pp["balls"]) + [pp["balls"].iloc[0]], list(pp["runs"]) + [pp["runs"].iloc[0]]]),
-            hovertemplate="<b>" + esc(batter) + "</b> · %{theta}<br>" + metric + ": %{r:.1f}<br>"
-                          "Balls: %{customdata[0]:,.0f}<br>Runs: %{customdata[1]:,.0f}<extra></extra>",
-        ))
-        rmax = max(max(r_p), max(r_l), 1) * 1.22
-        style_fig(fig, 360)
-        fig.update_layout(polar=dict(
-            bgcolor="rgba(0,0,0,0)",
-            radialaxis=dict(range=[0, rmax], gridcolor=GRID, linecolor=GRID, tickfont=dict(color=MUTED, size=10), angle=90),
-            angularaxis=dict(gridcolor=GRID, linecolor=GRID, tickfont=dict(color="#CBD5E1", size=13)),
-        ))
-        i = int(np.nanargmax(r_p))
-        ph_name = PHASES[i]
-        if metric == "Strike rate":
-            title = f"{batter} is most dangerous in the {ph_name} phase — {r_p[i]:.1f} SR"
-        elif metric == "Run share":
-            title = f"{batter} banks the most runs in the {ph_name} phase ({r_p[i]:.0f}% of runs)"
-        else:
-            title = f"{batter} faces the most dot balls in the {ph_name} phase ({r_p[i]:.0f}%)"
-        sub = f"Phase profile vs league · {fnum(pp['balls'].sum())} legal balls · {fnum(pp['runs'].sum())} runs"
-        render_head(head, "target", "Phase scouting radar", title, sub)
-        show_chart(fig, "chart_radar")
-
+        fig.add_trace(go.Bar(x=merged["phase"], y=merged["batter_value"], name=batter, marker_color=CYAN, text=[fmt_metric(v, metric) for v in merged["batter_value"]], textposition="outside"))
+        fig.add_trace(go.Bar(x=merged["phase"], y=merged["league_value"], name="League", marker_color=AMBER, text=[fmt_metric(v, metric) for v in merged["league_value"]], textposition="outside"))
+        style_fig(fig, 360, legend=True); fig.update_layout(barmode="group"); fig.update_xaxes(showgrid=False, title="Match phase"); fig.update_yaxes(title=metric)
+        i = int(np.nanargmax(merged["batter_value"].to_numpy())); ph_name = merged.iloc[i]["phase"]
+        title = f"{batter} performs best in the {ph_name} phase"
+        sub = f"{metric} compared with the league · {fnum(pp['balls'].sum())} legal balls · {fnum(pp['runs'].sum())} runs"
+        render_head(head, "target", "Strike rate by phase", title, sub)
+        show_chart(fig, "chart_phase")
 
 def render_opponents(batter, pdf_all, seasons_p, slug, page_season):
     with module("opp"):
@@ -1879,7 +1644,7 @@ def render_opponents(batter, pdf_all, seasons_p, slug, page_season):
             runs=("runs", "sum"), balls=("balls", "sum"), outs=("outs", "sum"), innings=("match_id", "size"))
         grp = grp[grp["balls"] >= max(mb, 1)].copy()
         if grp.empty:
-            render_head(head, "pin", "Opponent matchups", f"No opponent reaches {mb}+ legal balls", f"Minimum {mb} legal balls")
+            render_head(head, "pin", "Runs against opponent", f"No opponent reaches {mb}+ legal balls", f"Minimum {mb} legal balls")
             empty_state(f"No opponent reaches {mb} legal balls for this selection. Try lowering the minimum sample size.")
             return
         grp["sr"] = ratio(grp["runs"], grp["balls"], 100)
@@ -1919,61 +1684,28 @@ def render_opponents(batter, pdf_all, seasons_p, slug, page_season):
                 "Average": "averages best against"}[metric]
         title = f"{batter} {verb} {top['opponent']} ({top[col]:,.{dec}f}) — {mb}+ balls"
         sub_txt = f"Ranked by {metric.lower()} · minimum {mb} legal balls · {len(grp)} opponents shown · labels show metric · balls faced"
-        render_head(head, "pin", "Opponent matchups", title, sub_txt)
+        render_head(head, "pin", "Runs against opponent", title, sub_txt)
         show_chart(fig, "chart_opponents")
 
 
 def render_venues(batter, pdf_all, seasons_p, slug, page_season):
+    """Rank venues by runs so the best places are immediately visible."""
     with module("venue"):
-        head = st.empty()
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            season = player_chart_season("ven", slug, seasons_p, page_season)
-        with c2:
-            top_n = int(st.slider("Top N", 3, 15, 8, key=f"ven_topn_{slug}"))
-        with c3:
-            mb = int(st.number_input("Min balls", 0, 2000, 50, 10, key=f"ven_minballs_{slug}"))
-
-        sub = filter_season(pdf_all, season)
-        grp = sub.groupby("venue", as_index=False).agg(
-            runs=("runs", "sum"), balls=("balls", "sum"), outs=("outs", "sum"), innings=("match_id", "size"))
-        grp = grp[grp["balls"] >= max(mb, 1)].copy()
+        head = st.empty(); c1,c2,c3=st.columns(3)
+        with c1: season=player_chart_season("ven",slug,seasons_p,page_season)
+        with c2: top_n=int(st.slider("Top N",3,15,8,key=f"ven_topn_{slug}"))
+        with c3: mb=int(st.number_input("Min balls",0,2000,50,10,key=f"ven_minballs_{slug}"))
+        sub=filter_season(pdf_all,season)
+        grp=sub.groupby("venue",as_index=False).agg(runs=("runs","sum"),balls=("balls","sum"),outs=("outs","sum"),innings=("match_id","size"))
+        grp=grp[grp["balls"]>=max(mb,1)].copy()
         if grp.empty:
-            render_head(head, "pin", "Venue performance", f"No venue reaches {mb}+ legal balls", f"Minimum {mb} legal balls")
-            empty_state(f"No venue reaches {mb} legal balls for this selection. Try lowering the minimum sample size.")
-            return
-        grp["sr"] = ratio(grp["runs"], grp["balls"], 100)
-        grp = grp.dropna(subset=["sr"]).sort_values("runs", ascending=False).head(top_n)
-        grp["short"] = grp["venue"].map(short_venue)
-        colors = [PALETTE[i % len(PALETTE)] for i in range(len(grp))]
-        sizeref = 2.0 * grp["balls"].max() / (46.0 ** 2)
-        fig = go.Figure(go.Scatter(
-            x=grp["runs"], y=grp["sr"], mode="markers+text", text=grp["short"], textposition="top center",
-            textfont=dict(size=10, color="#CBD5E1"),
-            marker=dict(size=grp["balls"], sizemode="area", sizeref=sizeref, sizemin=9, color=colors, opacity=0.85,
-                        line=dict(color="rgba(255,255,255,.5)", width=1)),
-            customdata=np.column_stack([grp["venue"], grp["balls"], grp["innings"], grp["outs"]]),
-            hovertemplate="<b>%{customdata[0]}</b><br>Runs: %{x:,.0f}<br>Strike rate: %{y:.1f}<br>"
-                          "Balls: %{customdata[1]:,.0f}<br>Innings: %{customdata[2]:,.0f}<br>"
-                          "Dismissals: %{customdata[3]:,.0f}<extra></extra>",
-        ))
-        overall_sr = sdiv(sub["runs"].sum() * 100, sub["balls"].sum())
-        if np.isfinite(overall_sr):
-            fig.add_hline(y=overall_sr, line_dash="dot", line_color=AMBER, annotation_text=f"{batter} overall {overall_sr:.1f} SR",
-                          annotation_position="bottom right", annotation_font=dict(color=AMBER, size=10))
-        style_fig(fig, 380, legend=False)
-        xr = pad_range(list(grp["runs"]), 0.22)
-        yr = pad_range(list(grp["sr"]) + ([overall_sr] if np.isfinite(overall_sr) else []), 0.25)
-        fig.update_xaxes(title="Runs at venue", range=xr)
-        fig.update_yaxes(title="Strike rate", range=yr)
-
-        best = grp.iloc[0]
-        title = f"{short_venue(best['venue'])} is {batter}'s most productive venue — {best['runs']:,.0f} runs at {best['sr']:.1f} SR"
-        sub_txt = (f"Bubble size = legal balls · venue comparison — minimum {mb} legal balls · "
-                   f"{len(grp)} venues shown · {fnum(grp['balls'].sum())} balls")
-        render_head(head, "pin", "Venue performance", title, sub_txt)
-        show_chart(fig, "chart_venues")
-
+            render_head(head,"pin","Runs by venue",f"No venue reaches {mb}+ legal balls"); empty_state(f"No venue reaches {mb} legal balls for this selection."); return
+        grp["sr"]=ratio(grp["runs"],grp["balls"],100); grp=grp.dropna(subset=["sr"]).sort_values("runs",ascending=False).head(top_n); grp["short"]=grp["venue"].map(short_venue)
+        plot_df=grp.sort_values("runs",ascending=True)
+        fig=go.Figure(go.Bar(x=plot_df["runs"],y=plot_df["short"],orientation="h",marker_color=CYAN,text=[f"{v:,.0f}" for v in plot_df["runs"]],textposition="outside",cliponaxis=False,customdata=np.column_stack([plot_df["balls"],plot_df["sr"],plot_df["innings"],plot_df["outs"]]),hovertemplate="<b>%{y}</b><br>Runs: %{x:,.0f}<br>Strike rate: %{customdata[1]:.1f}<br>Balls: %{customdata[0]:,.0f}<br>Innings: %{customdata[2]:,.0f}<br>Dismissals: %{customdata[3]:,.0f}<extra></extra>"))
+        style_fig(fig,380,legend=False); fig.update_xaxes(title="Runs",rangemode="tozero"); fig.update_yaxes(showgrid=False)
+        best=grp.iloc[0]; title=f"{best['short']} is {batter}'s top venue by runs"; sub_txt=f"Ranked by total runs · minimum {mb} legal balls · {len(grp)} venues shown"
+        render_head(head,"pin","Runs by venue",title,sub_txt); show_chart(fig,"chart_venues")
 
 def render_dismissals(batter, seasons_p, slug, page_season):
     with module("dismiss"):
@@ -1991,7 +1723,7 @@ def render_dismissals(batter, seasons_p, slug, page_season):
         grp = sub.groupby("kind", as_index=False)["n"].sum().sort_values("n", ascending=False)
         grp = grp[grp["n"] > 0]
         if grp.empty:
-            render_head(head, "shield", "Dismissal profile", "No dismissals recorded for this selection")
+            render_head(head, "shield", "Dismissal type", "No dismissals recorded for this selection")
             empty_state("No dismissals recorded for this selection (the batter may have been not out, or the type filter is empty).")
             return
         total = int(grp["n"].sum())
@@ -2009,7 +1741,7 @@ def render_dismissals(batter, seasons_p, slug, page_season):
         top = grp.iloc[0]
         title = f"{batter} falls most often to {top['kind']} — {top['pct']:.0f}% of dismissals"
         sub_txt = f"Dismissal mix for the selected types · {total} dismissals · percentages are shares of the filtered total"
-        render_head(head, "shield", "Dismissal profile", title, sub_txt)
+        render_head(head, "shield", "Dismissal type", title, sub_txt)
         show_chart(fig, "chart_dismissals")
         insight_card("Insight", f"Most common dismissal: <b>{esc(top['kind'])}</b> — {top['pct']:.1f}% ({int(top['n'])} of {total}).")
 
@@ -2040,6 +1772,19 @@ def render_player_lab():
     avg = runs / outs if outs > 0 else runs
     season_txt = "all seasons" if page_season == "All" else f"season {page_season}"
 
+    # Selected-batter profile, matching the presentation sketch.
+    hand = "—"
+    if "batting_hand" in pdf.columns and not pdf["batting_hand"].dropna().empty:
+        hand = str(pdf["batting_hand"].dropna().mode().iloc[0])
+    html(f"""
+    <div class="module" style="margin:12px 0 18px;padding:16px 18px;border:1px solid rgba(148,163,184,.16);
+         border-radius:16px;background:linear-gradient(135deg,rgba(15,23,42,.82),rgba(30,58,138,.22));">
+      <div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#7F97B0;font-weight:700;">Selected batter</div>
+      <div style="font-size:24px;font-weight:800;color:#F8FAFC;margin-top:5px;">{esc(batter)}</div>
+      <div style="font-size:12px;color:#94A3B8;margin-top:3px;">Batting hand: {esc(hand)} · {season_txt}</div>
+    </div>
+    """)
+
     k1, k2, k3 = st.columns(3)
     with k1:
         kpi_card("target", "Runs + balls", f"{fnum(runs)} <span style='font-size:16px;color:#7F97B0'>off {fnum(balls)}</span>",
@@ -2062,7 +1807,6 @@ def render_player_lab():
         render_venues(batter, pdf_all, seasons_p, slug, page_season)
     with d:
         render_dismissals(batter, seasons_p, slug, page_season)
-
 
 # ============================================================
 # TABS
